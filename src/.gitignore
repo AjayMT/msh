@@ -1,0 +1,6 @@
+*
+!.gitignore
+!defs.ml
+!lexer.mll
+!parser.mly
+!msh.ml
