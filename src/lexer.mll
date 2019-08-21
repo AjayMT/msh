@@ -1,4 +1,8 @@
 
+(** lexer.mll
+ * M shell lexer rules.
+ *)
+
 {
   open Parser
   open Defs

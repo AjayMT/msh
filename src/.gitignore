@@ -1,5 +1,6 @@
 *
 !.gitignore
+!builtins.ml
 !defs.ml
 !lexer.mll
 !parser.mly

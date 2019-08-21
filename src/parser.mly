@@ -1,4 +1,7 @@
 
+// parser.mly
+// M shell Menhir/ocamlyacc grammar.
+
 %{ open Defs %}
 
 %token <string> WORD
