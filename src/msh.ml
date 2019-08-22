@@ -97,22 +97,23 @@ let eval_piped_exprs :
 
 let _ =
   while true do
-    printf "$ "; flush stdout;
+    if Unix.isatty Unix.stdin then print_string "$ ";
+    flush stderr;
+    flush stdout;
     begin
       try
         let lexbuf = Lexing.from_channel stdin in
         let result = Parser.main Lexer.token lexbuf in
         match result with
-        | Error err      -> print_string ("msh: Parse error: " ^ err)
+        | Error err      -> prerr_string ("msh: Parse error: " ^ err)
         | Ok piped_exprs ->
            let _, err = eval_piped_exprs piped_exprs in
            match err with
            | Ok ()   -> ()
-           | Error s -> print_string ("msh: Eval Error: " ^ s)
+           | Error s -> prerr_string ("msh: Eval Error: " ^ s)
       with
       | Lexer.Eof           -> exit 0
-      | Lexer.SyntaxError s -> printf "msh: Syntax error: %s" s
+      | Lexer.SyntaxError s -> prerr_string ("msh: Syntax error: " ^ s)
     end;
-    flush stdout
   done
 ;;
