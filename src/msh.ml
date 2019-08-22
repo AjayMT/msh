@@ -22,7 +22,7 @@ let find_exec_path : string -> exec option = fun name ->
      List.fold_left test_path None env_paths
 ;;
 
-let find_exec : string -> exec option = fun name ->
+let resolve_command : string -> exec option = fun name ->
   match Hashtbl.find_opt Builtins.builtins_table name with
   | Some b -> Some (Builtin b)
   | None   -> if Sys.file_exists name then
@@ -37,24 +37,62 @@ let construct_env : (string * string) list -> string array = fun local_env ->
   Array.concat [global_env; Array.of_list local_env_normalized]
 ;;
 
-let eval_piped_exprs : expr list -> (string, string) result = fun l ->
-  let spawn env name args = (
-      "",
-      Unix.create_process_env
-        name
-        (Array.of_list (name :: args))
-        (construct_env env)
-        Unix.stdin Unix.stdout Unix.stderr
-    ) in
-  let eval_expr : expr -> (string, string) result = function
-    | Empty                  -> Ok ""
-    | Expr (env, name, args) ->
-       match find_exec name with
-       | None             -> Error "Not found"
-       | Some (Builtin f) -> Ok (fst (f args))
-       | Some (Exec s)    -> Ok (fst (spawn env name args))
+let rec fold_left_pairs :
+          ('a -> 'b -> 'b option -> 'a) ->
+          'a -> 'b list -> 'a = fun f acc l ->
+  match l with
+  | []       -> acc
+  | [a]      -> f acc a None
+  | a::b::tl -> fold_left_pairs f (f acc a (Some b)) (b::tl)
+;;
+
+let eval_piped_exprs :
+      expr list ->
+      ((int * Unix.process_status) option * (unit, string) result) =
+  fun piped_exprs ->
+
+  let spawn pid_opt in_fd env name args next_opt =
+    let action = resolve_command name in
+    match action with
+    | None -> (pid_opt, in_fd, Error (name ^ " not found"))
+    | Some (Builtin b) ->
+       let (next_in, next_out) = match next_opt with
+         | None   -> (Unix.stdin, Unix.stdout)
+         | Some _ -> Unix.pipe ()
+       in
+       (pid_opt, next_in, b env args in_fd next_out)
+    | Some (Exec e) ->
+       let (next_in, next_out) = match next_opt with
+         | None   -> (Unix.stdin, Unix.stdout)
+         | Some _ -> Unix.pipe ()
+       in
+       let pid = Unix.create_process_env
+                   name
+                   (Array.of_list (name :: args))
+                   (construct_env env)
+                   in_fd next_out Unix.stderr
+       in
+       (Some pid, next_in, Ok ())
   in
-  eval_expr (List.hd l)
+
+  let eval_expr acc curr next_opt =
+    let (pid_opt, in_fd, err) = acc in
+    match err with
+    | Error e -> acc
+    | Ok ()   ->
+       match curr with
+       | Empty -> acc
+       | Expr (env, name, args) -> spawn pid_opt in_fd env name args next_opt
+  in
+
+  let (pid, _, err) = fold_left_pairs
+                        eval_expr
+                        (None, Unix.stdin, Ok ())
+                        piped_exprs
+  in
+  match pid with
+  | Some p -> (Some (Unix.waitpid [] p), err)
+  | None   -> (None, err)
 ;;
 
 let _ =
@@ -67,11 +105,10 @@ let _ =
         match result with
         | Error err      -> print_string ("msh: Parse error: " ^ err)
         | Ok piped_exprs ->
-           begin
-             match eval_piped_exprs piped_exprs with
-             | Ok s    -> flush stdout; print_string s
-             | Error s -> flush stdout; print_string ("msh: Eval error: " ^ s)
-           end;
+           let _, err = eval_piped_exprs piped_exprs in
+           match err with
+           | Ok ()   -> ()
+           | Error s -> print_string ("msh: Eval Error: " ^ s)
       with
       | Lexer.Eof           -> exit 0
       | Lexer.SyntaxError s -> printf "msh: Syntax error: %s" s
