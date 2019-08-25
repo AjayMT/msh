@@ -8,6 +8,7 @@ open Printf
 
 type exec = Builtin of Builtins.builtin_func | Exec of string
 
+(* Find an executable in the PATH environment variable. *)
 let find_exec_path : string -> exec option = fun name ->
   match (Sys.getenv_opt "PATH") with
   | None          -> None
@@ -20,8 +21,10 @@ let find_exec_path : string -> exec option = fun name ->
           if Sys.file_exists file_path then Some (Exec file_path) else None
      in
      List.fold_left test_path None env_paths
-;;
 
+
+(* Determine the type of a command, i.e shell builtin or executable,
+   and find its path if applicable. *)
 let resolve_command : string -> exec option = fun name ->
   match Hashtbl.find_opt Builtins.builtins_table name with
   | Some b -> Some (Builtin b)
@@ -29,14 +32,19 @@ let resolve_command : string -> exec option = fun name ->
                 Some (Exec name)
               else
                 find_exec_path name
-;;
 
+
+(* Convert a list of (key, value) environment variable pairs into
+  an array of 'key=value' strings, and concatenate it with msh's
+  environment variables. *)
 let construct_env : (string * string) list -> string array = fun local_env ->
   let global_env = Unix.environment () in
   let local_env_normalized = List.map (fun (k, v) -> k ^ "=" ^ v) local_env in
   Array.concat [global_env; Array.of_list local_env_normalized]
-;;
 
+
+(* Fold left, but apply the function to (a, a option) pairs of elements
+   instead of single elements. *)
 let rec fold_left_pairs :
           ('a -> 'b -> 'b option -> 'a) ->
           'a -> 'b list -> 'a = fun f acc l ->
@@ -44,13 +52,17 @@ let rec fold_left_pairs :
   | []       -> acc
   | [a]      -> f acc a None
   | a::b::tl -> fold_left_pairs f (f acc a (Some b)) (b::tl)
-;;
 
+
+(* Evaluate a list of expressions separated by pipes, i.e
+   `ls | cat | foo | bar` etc. *)
 let eval_piped_exprs :
       expr list ->
       ((int * Unix.process_status) option * (unit, string) result) =
   fun piped_exprs ->
 
+  (* Spawn a new process/call a buitlin and connect its stdin to the
+     previous process's stdout. *)
   let spawn pid_opt in_fd env name args next_opt =
     let action = resolve_command name in
     match action with
@@ -60,7 +72,10 @@ let eval_piped_exprs :
          | None   -> (Unix.stdin, Unix.stdout)
          | Some _ -> Unix.pipe ()
        in
-       (pid_opt, next_in, b env args in_fd next_out)
+       let result = (pid_opt, next_in, b env args in_fd next_out) in
+       let () = if next_out = Unix.stdout then () else Unix.close next_out
+       in
+       result
     | Some (Exec e) ->
        let (next_in, next_out) = match next_opt with
          | None   -> (Unix.stdin, Unix.stdout)
@@ -72,9 +87,12 @@ let eval_piped_exprs :
                    (construct_env env)
                    in_fd next_out Unix.stderr
        in
+       let () = if next_out = Unix.stdout then () else Unix.close next_out
+       in
        (Some pid, next_in, Ok ())
   in
 
+  (* Evaluate expressions, connecting stdin/stdout FDs as necessary. *)
   let eval_expr acc curr next_opt =
     let (pid_opt, in_fd, err) = acc in
     match err with
@@ -93,7 +111,7 @@ let eval_piped_exprs :
   match pid with
   | Some p -> (Some (Unix.waitpid [] p), err)
   | None   -> (None, err)
-;;
+
 
 let _ =
   while true do
@@ -114,6 +132,5 @@ let _ =
       with
       | Lexer.Eof           -> exit 0
       | Lexer.SyntaxError s -> prerr_string ("msh: Syntax error: " ^ s)
-    end;
+    end
   done
-;;

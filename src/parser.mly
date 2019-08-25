@@ -7,7 +7,6 @@
 %token <string> WORD
 %token <string * string> ENVPAIR
 %token PIPE
-%token EQ
 %token EOL
 
 %start main

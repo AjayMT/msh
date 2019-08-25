@@ -13,13 +13,13 @@ let cd : builtin_func = fun _ args _ _ ->
   match args with
   | []   -> Ok (Sys.chdir (Sys.getenv "HOME"))
   | h::_ -> Ok (Sys.chdir h)
-;;
+
 
 let echo : builtin_func = fun _ args _ out_fd ->
   let str = String.concat " " args in
   let written = Unix.write_substring out_fd str 0 (String.length str) in
   if written = (String.length str) then Ok () else Error "Write failed"
-;;
+
 
 let exit_ : builtin_func = fun _ args _ _ ->
   match args with
@@ -27,7 +27,7 @@ let exit_ : builtin_func = fun _ args _ _ ->
   | h::_ -> match int_of_string_opt h with
             | Some i -> Ok (exit i)
             | None   -> Error "Bad argument"
-;;
+
 
 let builtins_table =
   let l = [
